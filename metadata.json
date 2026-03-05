@@ -1,0 +1,5 @@
+{
+  "name": "SalesCoach AI",
+  "description": "AI-powered sales coaching platform that analyzes call recordings to provide diarized transcripts, sentiment analysis, and actionable coaching insights.",
+  "requestFramePermissions": []
+}
