@@ -1,0 +1,121 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: /users/{userId}
+    // Fields:
+    //   - uid: string (required)
+    //   - email: string (required)
+    //   - displayName: string
+    //   - photoURL: string
+    //   - role: string (sales_rep, manager, admin)
+    //   - createdAt: timestamp
+    //
+    // Collection: /users/{userId}/calls/{callId}
+    // Fields:
+    //   - userId: string (required)
+    //   - title: string (required, max 100)
+    //   - date: timestamp (required)
+    //   - duration: string
+    //   - overallSentiment: number
+    //   - insights: map (summary, strengths, opportunities)
+    //   - transcript: list (segments)
+    //   - notes: string (max 5000)
+    //   - ratings: map
+    //   - templateId: string
+    //
+    // Collection: /users/{userId}/templates/{templateId}
+    // Fields:
+    //   - userId: string (required)
+    //   - name: string (required, max 100)
+    //   - description: string (max 200)
+    //   - instructions: string (required, max 2000)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          (request.auth.token.email == "mojahedabdo1996@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isManager() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'manager' || isAdmin());
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+    
+    function isValidUser(data) {
+      return hasOnlyAllowedFields(['uid', 'email', 'displayName', 'photoURL', 'role', 'createdAt']) &&
+             data.uid == request.auth.uid &&
+             isValidEmail(data.email) &&
+             data.role in ['sales_rep', 'manager', 'admin'];
+    }
+
+    function isValidCall(data, userId) {
+      return hasOnlyAllowedFields(['userId', 'title', 'date', 'duration', 'overallSentiment', 'insights', 'transcript', 'notes', 'ratings', 'templateId', 'audioUrl']) &&
+             data.userId == userId &&
+             data.title is string && data.title.size() <= 100 &&
+             data.notes is string && data.notes.size() <= 5000;
+    }
+
+    function isValidTemplate(data, userId) {
+      return hasOnlyAllowedFields(['userId', 'name', 'description', 'instructions']) &&
+             data.userId == userId &&
+             data.name is string && data.name.size() <= 100 &&
+             data.instructions is string && data.instructions.size() <= 2000;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isManager();
+      allow create: if isAuthenticated() && isValidUser(request.resource.data) && 
+                    ((isOwner(userId) && request.resource.data.role == 'sales_rep') || isAdmin());
+      allow update: if isAuthenticated() && isValidUser(request.resource.data) && 
+                    ((isOwner(userId) && request.resource.data.role == resource.data.role) || isAdmin());
+
+      match /calls/{callId} {
+        allow read: if isOwner(userId) || isManager();
+        allow create: if isOwner(userId) && isValidCall(request.resource.data, userId);
+        allow update: if isOwner(userId) && isValidCall(request.resource.data, userId);
+        allow delete: if isOwner(userId) || isAdmin();
+      }
+
+      match /templates/{templateId} {
+        allow read: if isOwner(userId) || isManager();
+        allow create: if isOwner(userId) && isValidTemplate(request.resource.data, userId);
+        allow update: if isOwner(userId) && isValidTemplate(request.resource.data, userId);
+        allow delete: if isOwner(userId) || isAdmin();
+      }
+    }
+  }
+}

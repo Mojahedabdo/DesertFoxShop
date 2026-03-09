@@ -1,0 +1,66 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "Stores user preferences and metadata",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "role": { 
+          "type": "string", 
+          "enum": ["sales_rep", "manager", "admin"],
+          "description": "User role for access control"
+        },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "CallAnalysis": {
+      "title": "Call Analysis Record",
+      "description": "Stores the results of a sales call analysis",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "duration": { "type": "string" },
+        "overallSentiment": { "type": "number" },
+        "insights": { "type": "object" },
+        "transcript": { "type": "array" },
+        "notes": { "type": "string" },
+        "ratings": { "type": "object" },
+        "templateId": { "type": "string" }
+      },
+      "required": ["userId", "title", "date"]
+    },
+    "CoachingTemplate": {
+      "title": "Coaching Template",
+      "description": "Custom AI coaching instructions",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "instructions": { "type": "string" }
+      },
+      "required": ["userId", "name", "instructions"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile document"
+    },
+    "/users/{userId}/calls/{callId}": {
+      "schema": "CallAnalysis",
+      "description": "History of analyzed calls for a user"
+    },
+    "/users/{userId}/templates/{templateId}": {
+      "schema": "CoachingTemplate",
+      "description": "Custom coaching templates for a user"
+    }
+  }
+}
