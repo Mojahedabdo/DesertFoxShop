@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useImperativeHandle, forwardRef } from 'react';
 import { 
   Upload, 
   FileAudio, 
@@ -40,7 +40,9 @@ import {
   Volume2,
   VolumeX,
   ExternalLink,
-  Star
+  Star,
+  SkipBack,
+  SkipForward
 } from 'lucide-react';
 import { 
   LineChart, 
@@ -132,17 +134,41 @@ interface AppUser extends User {
   role: 'sales_rep' | 'manager' | 'admin';
 }
 
-function AudioPlayer({ 
+const AudioPlayer = forwardRef(({ 
   src, 
   onTimeUpdate, 
+  onPlayPause,
   seekTo 
 }: { 
   src: string; 
   onTimeUpdate?: (time: number) => void;
+  onPlayPause?: (isPlaying: boolean) => void;
   seekTo?: number | null;
-}) {
+}, ref) => {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
+
+  useImperativeHandle(ref, () => ({
+    togglePlay: () => {
+      togglePlay();
+    },
+    pause: () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        setIsPlaying(false);
+      }
+    },
+    play: () => {
+      if (audioRef.current) {
+        audioRef.current.play();
+        setIsPlaying(true);
+      }
+    }
+  }));
+
+  useEffect(() => {
+    onPlayPause?.(isPlaying);
+  }, [isPlaying]);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(1);
@@ -166,6 +192,12 @@ function AudioPlayer({
         audioRef.current.play();
       }
       setIsPlaying(!isPlaying);
+    }
+  };
+
+  const skip = (amount: number) => {
+    if (audioRef.current) {
+      audioRef.current.currentTime = Math.max(0, Math.min(duration, audioRef.current.currentTime + amount));
     }
   };
 
@@ -218,10 +250,24 @@ function AudioPlayer({
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
             <button 
+              onClick={() => skip(-10)}
+              className="p-2 text-zinc-400 hover:text-white transition-colors"
+              title="Skip back 10s"
+            >
+              <SkipBack size={20} />
+            </button>
+            <button 
               onClick={togglePlay}
               className="w-12 h-12 bg-indigo-600 rounded-full flex items-center justify-center hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-500/20"
             >
               {isPlaying ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" className="ml-1" />}
+            </button>
+            <button 
+              onClick={() => skip(10)}
+              className="p-2 text-zinc-400 hover:text-white transition-colors"
+              title="Skip forward 10s"
+            >
+              <SkipForward size={20} />
             </button>
             <button 
               onClick={() => { if(audioRef.current) audioRef.current.currentTime = 0; }}
@@ -269,7 +315,7 @@ function AudioPlayer({
       </div>
     </div>
   );
-}
+});
 
 function LiveCoachingController({ onTip }: { onTip: (tip: string) => void }) {
   const [isActive, setIsActive] = useState(false);
@@ -480,6 +526,7 @@ export default function App() {
   const [isSubmittingFeedback, setIsSubmittingFeedback] = useState(false);
   const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
   const [currentAudioTime, setCurrentAudioTime] = useState(0);
+  const [isAudioPlaying, setIsAudioPlaying] = useState(false);
   const [seekToTime, setSeekToTime] = useState<number | null>(null);
   const [templates, setTemplates] = useState<CoachingTemplate[]>(() => {
     const saved = localStorage.getItem('salescoach_templates');
@@ -492,6 +539,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const audioPlayerRef = useRef<{ togglePlay: () => void, pause: () => void, play: () => void }>(null);
 
   const filteredHistory = callHistory.filter(call => {
     if (!searchQuery) return true;
@@ -766,9 +814,18 @@ export default function App() {
 
   const handleSeekToSegment = (timestamp: string) => {
     const seconds = parseTimestamp(timestamp);
-    setSeekToTime(seconds);
-    // Reset seekToTime after a short delay so it can be triggered again for the same timestamp
-    setTimeout(() => setSeekToTime(null), 100);
+    
+    // If clicking the currently active segment, toggle play/pause
+    const segmentStartTime = seconds;
+    const isCurrentlyActive = currentAudioTime >= segmentStartTime && currentAudioTime < segmentStartTime + 5; // Rough check for "current"
+    
+    if (isCurrentlyActive && isAudioPlaying) {
+      audioPlayerRef.current?.pause();
+    } else {
+      setSeekToTime(seconds);
+      // Reset seekToTime after a short delay so it can be triggered again for the same timestamp
+      setTimeout(() => setSeekToTime(null), 100);
+    }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1283,7 +1340,7 @@ export default function App() {
                           <thead>
                             <tr className="border-b border-zinc-100 bg-zinc-50/50">
                               <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-zinc-400">Title</th>
-                              <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-zinc-400">Duration</th>
+                              <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-zinc-400">Call Duration</th>
                               <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-zinc-400">Date</th>
                               <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-zinc-400">Sentiment</th>
                               <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-zinc-400">Recording</th>
@@ -1333,16 +1390,27 @@ export default function App() {
                                   </td>
                                   <td className="px-6 py-4">
                                     {call.audioUrl ? (
-                                      <a 
-                                        href={call.audioUrl} 
-                                        target="_blank" 
-                                        rel="noopener noreferrer"
-                                        onClick={(e) => e.stopPropagation()}
-                                        className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-600 hover:text-indigo-700 bg-indigo-50 px-3 py-1.5 rounded-xl transition-all"
-                                      >
-                                        <ExternalLink size={12} />
-                                        <span>Listen</span>
-                                      </a>
+                                      <div className="flex items-center gap-2">
+                                        <a 
+                                          href={call.audioUrl} 
+                                          target="_blank" 
+                                          rel="noopener noreferrer"
+                                          onClick={(e) => e.stopPropagation()}
+                                          className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-600 hover:text-indigo-700 bg-indigo-50 px-3 py-1.5 rounded-xl transition-all"
+                                        >
+                                          <ExternalLink size={12} />
+                                          <span>Listen</span>
+                                        </a>
+                                        <a 
+                                          href={call.audioUrl} 
+                                          download={`${call.title}.mp3`}
+                                          onClick={(e) => e.stopPropagation()}
+                                          className="p-2 text-zinc-400 hover:text-indigo-600 hover:bg-zinc-100 rounded-lg transition-all"
+                                          title="Download Recording"
+                                        >
+                                          <Download size={14} />
+                                        </a>
+                                      </div>
                                     ) : (
                                       <span className="text-xs font-bold text-zinc-300 italic">No Audio</span>
                                     )}
@@ -1461,7 +1529,7 @@ export default function App() {
                     <thead>
                       <tr className="border-b border-zinc-100 bg-zinc-50/50">
                         <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-zinc-400">Title</th>
-                        <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-zinc-400">Duration</th>
+                        <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-zinc-400">Call Duration</th>
                         <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-zinc-400">Date</th>
                         <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-zinc-400">Sentiment</th>
                         <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-zinc-400">Recording</th>
@@ -1505,16 +1573,27 @@ export default function App() {
                           </td>
                           <td className="px-6 py-4">
                             {call.audioUrl ? (
-                              <a 
-                                href={call.audioUrl} 
-                                target="_blank" 
-                                rel="noopener noreferrer"
-                                onClick={(e) => e.stopPropagation()}
-                                className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-600 hover:text-indigo-700 bg-indigo-50 px-3 py-1.5 rounded-xl transition-all"
-                              >
-                                <ExternalLink size={12} />
-                                <span>Listen</span>
-                              </a>
+                              <div className="flex items-center gap-2">
+                                <a 
+                                  href={call.audioUrl} 
+                                  target="_blank" 
+                                  rel="noopener noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-600 hover:text-indigo-700 bg-indigo-50 px-3 py-1.5 rounded-xl transition-all"
+                                >
+                                  <ExternalLink size={12} />
+                                  <span>Listen</span>
+                                </a>
+                                <a 
+                                  href={call.audioUrl} 
+                                  download={`${call.title}.mp3`}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="p-2 text-zinc-400 hover:text-indigo-600 hover:bg-zinc-100 rounded-lg transition-all"
+                                  title="Download Recording"
+                                >
+                                  <Download size={14} />
+                                </a>
+                              </div>
                             ) : (
                               <span className="text-xs font-bold text-zinc-300 italic">No Audio</span>
                             )}
@@ -2074,15 +2153,6 @@ export default function App() {
                       </div>
                     </div>
                   </div>
-                {/* Audio Player */}
-                {audioUrl && (
-                  <AudioPlayer 
-                    src={audioUrl} 
-                    onTimeUpdate={setCurrentAudioTime}
-                    seekTo={seekToTime}
-                  />
-                )}
-
                 {/* Call Summary */}
                 <section className="bg-white rounded-3xl p-6 shadow-sm border border-zinc-200">
                   <h3 className="text-sm font-bold uppercase tracking-wider text-zinc-400 mb-4 flex items-center justify-between gap-2">
@@ -2355,7 +2425,7 @@ export default function App() {
                         onClick={(data) => {
                           if (data && data.activePayload && data.activePayload.length) {
                             const segment = data.activePayload[0].payload;
-                            console.log("User clicked graph at:", segment.timestamp, "Content:", segment.text);
+                            handleSeekToSegment(segment.timestamp);
                           }
                         }}
                       >
@@ -2521,11 +2591,18 @@ export default function App() {
                                     </div>
                                   )}
                                 </div>
-                                <button className={cn(
-                                  "p-1.5 rounded-lg transition-colors",
-                                  segment.speaker === "Sales Representative" ? "hover:bg-zinc-100 text-zinc-400" : "hover:bg-white/10 text-zinc-500"
-                                )}>
-                                  <Play size={12} fill="currentColor" />
+                                <button 
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleSeekToSegment(segment.timestamp);
+                                  }}
+                                  className={cn(
+                                    "p-1.5 rounded-lg transition-colors",
+                                    segment.speaker === "Sales Representative" ? "hover:bg-zinc-100 text-zinc-400" : "hover:bg-white/10 text-zinc-500",
+                                    isActive && isAudioPlaying && "text-indigo-600 bg-indigo-50"
+                                  )}
+                                >
+                                  {isActive && isAudioPlaying ? <Pause size={12} fill="currentColor" /> : <Play size={12} fill="currentColor" />}
                                 </button>
                               </div>
                             </div>
@@ -2567,6 +2644,25 @@ export default function App() {
         )}
       </AnimatePresence>
       </main>
+
+      <AnimatePresence>
+        {view === 'analysis' && audioUrl && (
+          <motion.div 
+            initial={{ y: 100 }}
+            animate={{ y: 0 }}
+            exit={{ y: 100 }}
+            className="fixed bottom-8 left-1/2 -translate-x-1/2 w-full max-w-2xl px-4 z-50"
+          >
+            <AudioPlayer 
+              ref={audioPlayerRef}
+              src={audioUrl} 
+              onTimeUpdate={setCurrentAudioTime}
+              onPlayPause={setIsAudioPlaying}
+              seekTo={seekToTime}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <style>{`
         .custom-scrollbar::-webkit-scrollbar {
